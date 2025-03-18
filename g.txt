@@ -1,0 +1,67 @@
+import sqlite3
+import logging
+import asyncio
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.utils import executor
+from datetime import datetime, timedelta
+
+# تنظیمات
+TOKEN = "7767135522:AAFVIFSKqH0CdS8ncyJN7j3m0wsXl8Z68ks"  # توکن رباتت رو اینجا بذار
+FORWARD_CHAT_ID = -6679744892  # آیدی چت مقصد
+
+# تنظیمات لاگ
+logging.basicConfig(level=logging.INFO)
+
+# راه‌اندازی ربات
+bot = Bot(token=TOKEN)
+dp = Dispatcher(bot)
+
+# اتصال به دیتابیس
+conn = sqlite3.connect("users.db")
+cursor = conn.cursor()
+cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY,
+        expires_at TEXT
+    )
+""")
+conn.commit()
+
+# دکمه‌های کیبورد
+keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+keyboard.add(KeyboardButton("🔄 تمدید اشتراک"))
+
+# بررسی وضعیت اشتراک
+def check_subscription(user_id):
+    cursor.execute("SELECT expires_at FROM users WHERE user_id=?", (user_id,))
+    result = cursor.fetchone()
+    if result:
+        expires_at = datetime.strptime(result[0], "%Y-%m-%d %H:%M:%S")
+        return expires_at > datetime.now()
+    return False
+
+# ثبت‌نام با اشتراک سه‌روزه رایگان
+@dp.message_handler(commands=["start"])
+async def start(message: types.Message):
+    user_id = message.from_user.id
+    if not check_subscription(user_id):
+        expires_at = datetime.now() + timedelta(days=3)
+        cursor.execute("INSERT OR REPLACE INTO users (user_id, expires_at) VALUES (?, ?)", (user_id, expires_at.strftime("%Y-%m-%d %H:%M:%S")))
+        conn.commit()
+        await message.answer("✅ اشتراک ۳ روزه رایگان شما فعال شد!", reply_markup=keyboard)
+    else:
+        await message.answer("✅ شما در حال حاضر اشتراک فعال دارید.", reply_markup=keyboard)
+
+# دریافت و فوروارد پیام
+@dp.message_handler(content_types=types.ContentTypes.ANY)
+async def forward_message(message: types.Message):
+    user_id = message.from_user.id
+    if check_subscription(user_id):
+        await bot.forward_message(FORWARD_CHAT_ID, message.chat.id, message.message_id)
+    else:
+        await message.answer("❌ اشتراک شما به پایان رسیده است. لطفاً اشتراک خود را تمدید کنید.")
+
+# اجرای ربات
+if name == "main":
+    executor.start_polling(dp, skip_updates=True)
